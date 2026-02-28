@@ -27,6 +27,7 @@
 .header-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .header h1 {
@@ -41,6 +42,7 @@
   align-items: center;
   gap: 10px;
   margin-top: 16px;
+  flex-wrap: wrap;
 }
 
 .toolbar input,
@@ -629,6 +631,37 @@
     align-items: flex-start;
   }
 
+  .header-actions {
+    width: 100%;
+    gap: 6px;
+  }
+
+  .header-actions .btn {
+    flex: 1 1 calc(33.333% - 6px);
+    min-width: 92px;
+    text-align: center;
+    padding: 8px 10px;
+  }
+
+  .toolbar {
+    align-items: flex-end;
+    gap: 8px;
+  }
+
+  .toolbar label {
+    font-size: 13px;
+  }
+
+  .toolbar input,
+  .toolbar select {
+    width: 100%;
+    min-width: 90px;
+  }
+
+  .toolbar .btn {
+    min-height: 40px;
+  }
+
   .test-stats {
     grid-template-columns: 1fr;
   }
@@ -661,6 +694,23 @@
 }
 
 @media (max-width: 640px) {
+  .header-actions .btn {
+    flex: 1 1 calc(50% - 6px);
+  }
+
+  .toolbar > * {
+    flex: 1 1 calc(50% - 8px);
+  }
+
+  .toolbar label {
+    flex: 1 1 100%;
+    margin-top: 2px;
+  }
+
+  .toolbar .btn {
+    width: 100%;
+  }
+
   .cards-grid {
     grid-template-columns: 1fr;
   }
