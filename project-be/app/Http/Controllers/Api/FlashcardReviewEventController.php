@@ -15,75 +15,97 @@ class FlashcardReviewEventController extends Controller
     public function learningOverview(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'end_date' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
-            'days' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:60'],
+            'end_date'  => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+            'days'      => ['sometimes', 'nullable', 'integer', 'min:1', 'max:60'],
             'back_lang' => ['sometimes', 'nullable', 'string', 'max:10'],
         ]);
 
-        $endDate = $validated['end_date'] ?? now()->toDateString();
-        $days = (int) ($validated['days'] ?? 14);
+        $endDate  = $validated['end_date'] ?? now()->toDateString();
+        $days     = (int) ($validated['days'] ?? 14);
         $startDate = Carbon::parse($endDate)->subDays($days - 1)->toDateString();
         $backLang = $validated['back_lang'] ?? null;
 
+        /*
+        |--------------------------------------------------------------------------
+        | 1️⃣ Get created per day (ONLY within range)
+        |--------------------------------------------------------------------------
+        */
         $createdQuery = Flashcard::query()
-            ->selectRaw('DATE(created_at) as created_date, COUNT(*) as total_created')
+            ->selectRaw('DATE(created_at) as date, COUNT(*) as created_count')
             ->whereDate('created_at', '<=', $endDate);
-        if (! empty($backLang) && $backLang !== 'all') {
+
+        if (!empty($backLang) && $backLang !== 'all') {
             $createdQuery->where('back_lang', $backLang);
         }
+
         $createdByDate = $createdQuery
             ->groupBy(DB::raw('DATE(created_at)'))
-            ->orderBy('created_date')
-            ->get()
-            ->map(fn ($row): array => [
-                'created_date' => (string) $row->created_date,
-                'total_created' => (int) $row->total_created,
-            ])
-            ->values();
+            ->pluck('created_count', 'date');
 
-        $eventQuery = FlashcardReviewEvent::query()
-            ->selectRaw('DATE(event_date) as event_date, COUNT(DISTINCT flashcard_id) as learned_count')
+        /*
+        |--------------------------------------------------------------------------
+        | 2️⃣ Get learned per day (within range)
+        |--------------------------------------------------------------------------
+        */
+        $learnedQuery = FlashcardReviewEvent::query()
+            ->selectRaw('DATE(event_date) as date, COUNT(DISTINCT flashcard_id) as learned_count')
             ->whereDate('event_date', '>=', $startDate)
             ->whereDate('event_date', '<=', $endDate);
 
-        if (! empty($backLang) && $backLang !== 'all') {
-            $eventQuery->where('back_lang', $backLang);
+        if (!empty($backLang) && $backLang !== 'all') {
+            $learnedQuery->where('back_lang', $backLang);
         }
 
-        $learnedByDate = $eventQuery
+        $learnedByDate = $learnedQuery
             ->groupBy(DB::raw('DATE(event_date)'))
-            ->pluck('learned_count', 'event_date');
+            ->pluck('learned_count', 'date');
 
+        /*
+        |--------------------------------------------------------------------------
+        | 3️⃣ Build daily series with cumulative logic
+        |--------------------------------------------------------------------------
+        */
         $series = collect();
+
         $cumulativeTotalWords = 0;
-        $createdIndex = 0;
-        for ($offset = 0; $offset < $days; $offset++) {
-            $date = Carbon::parse($startDate)->addDays($offset)->toDateString();
-            while ($createdIndex < $createdByDate->count() && $createdByDate[$createdIndex]['created_date'] <= $date) {
-                $cumulativeTotalWords += (int) $createdByDate[$createdIndex]['total_created'];
-                $createdIndex++;
-            }
-            $learnedCount = (int) ($learnedByDate[$date] ?? 0);
+        $cumulativeLearned    = 0;
+
+        for ($i = 0; $i < $days; $i++) {
+            $date = Carbon::parse($startDate)->addDays($i)->toDateString();
+
+            $createdToday = (int) ($createdByDate[$date] ?? 0);
+            $learnedToday = (int) ($learnedByDate[$date] ?? 0);
+
+            $cumulativeTotalWords += $createdToday;
+            $cumulativeLearned    += $learnedToday;
+
             $series->push([
-                'event_date' => $date,
-                'learned_count' => $learnedCount,
-                'total_words' => $cumulativeTotalWords,
-                'unlearned_count' => max(0, $cumulativeTotalWords - $learnedCount),
+                'event_date'       => $date,
+                'created_today'    => $createdToday,
+                'learned_today'    => $learnedToday,
+                'total_words'      => $cumulativeTotalWords,
+                'total_learned'    => $cumulativeLearned,
+                'unlearned_count'  => max(0, $cumulativeTotalWords - $cumulativeLearned),
             ]);
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | 4️⃣ Response
+        |--------------------------------------------------------------------------
+        */
         return response()->json([
             'data' => $series,
             'meta' => [
-                'start_date' => $startDate,
-                'end_date' => $endDate,
-                'days' => $days,
-                'back_lang' => $backLang ?? 'all',
+                'start_date'         => $startDate,
+                'end_date'           => $endDate,
+                'days'               => $days,
+                'back_lang'          => $backLang ?? 'all',
                 'total_words_latest' => $series->last()['total_words'] ?? 0,
+                'total_learned_latest' => $series->last()['total_learned'] ?? 0,
             ],
         ]);
     }
-
     public function dayDetail(Request $request): JsonResponse
     {
         $validated = $request->validate([
