@@ -12,6 +12,57 @@ use Illuminate\Support\Facades\DB;
 
 class FlashcardReviewEventController extends Controller
 {
+    public function index(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'start_date' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+            'end_date' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+            'back_lang' => ['sometimes', 'nullable', 'string', 'max:10'],
+            'limit' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:1000'],
+        ]);
+
+        $endDate = $validated['end_date'] ?? now()->toDateString();
+        $startDate = $validated['start_date'] ?? Carbon::parse($endDate)->subDays(6)->toDateString();
+        $backLang = $validated['back_lang'] ?? null;
+        $limit = (int) ($validated['limit'] ?? 500);
+
+        $query = FlashcardReviewEvent::query()
+            ->with(['flashcard:id,front_text,back_text,back_lang'])
+            ->whereDate('event_date', '>=', $startDate)
+            ->whereDate('event_date', '<=', $endDate);
+
+        if (! empty($backLang) && $backLang !== 'all') {
+            $query->where('back_lang', $backLang);
+        }
+
+        $items = $query
+            ->orderByDesc('event_at')
+            ->limit($limit)
+            ->get()
+            ->map(fn (FlashcardReviewEvent $item): array => [
+                'id' => $item->id,
+                'flashcard_id' => $item->flashcard_id,
+                'event_at' => optional($item->event_at)->toDateTimeString(),
+                'event_date' => $item->event_date instanceof Carbon ? $item->event_date->toDateString() : (string) $item->event_date,
+                'back_lang' => $item->back_lang,
+                'remembered' => $item->remembered,
+                'known' => $item->known,
+                'vietnamese_sentence' => $item->flashcard?->front_text,
+                'english_sentence' => $item->flashcard?->back_text,
+            ])
+            ->values();
+
+        return response()->json([
+            'data' => $items,
+            'meta' => [
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'back_lang' => $backLang ?? 'all',
+                'count' => $items->count(),
+            ],
+        ]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([

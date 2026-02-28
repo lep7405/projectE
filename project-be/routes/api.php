@@ -35,4 +35,5 @@ Route::patch('/tasks/{task}', [TaskController::class, 'update']);
 Route::delete('/tasks/{task}', [TaskController::class, 'destroy']);
 
 Route::post('/flashcard-review-events', [FlashcardReviewEventController::class, 'store']);
+Route::get('/flashcard-review-events', [FlashcardReviewEventController::class, 'index']);
 Route::get('/flashcard-review-events/stats/daily', [FlashcardReviewEventController::class, 'dailyStats']);

@@ -78,7 +78,7 @@ function App() {
   });
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [taskSubmitting, setTaskSubmitting] = useState(false);
-  const [dailyClickStats, setDailyClickStats] = useState([]);
+  const [clickHistory, setClickHistory] = useState([]);
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsBackLang, setStatsBackLang] = useState("all");
   const [statsStartDate, setStatsStartDate] = useState(weekAgoYmd);
@@ -188,11 +188,12 @@ function App() {
       if (currentStartDate) params.set("start_date", currentStartDate);
       if (currentEndDate) params.set("end_date", currentEndDate);
       if (currentBackLang && currentBackLang !== "all") params.set("back_lang", currentBackLang);
+      params.set("limit", "500");
 
-      const res = await fetch(`${apiBaseUrl}/flashcard-review-events/stats/daily?${params.toString()}`);
-      if (!res.ok) throw new Error("Cannot load click stats");
+      const res = await fetch(`${apiBaseUrl}/flashcard-review-events?${params.toString()}`);
+      if (!res.ok) throw new Error("Cannot load click history");
       const data = await res.json();
-      setDailyClickStats(data.data || []);
+      setClickHistory(data.data || []);
     } catch (err) {
       setError(err.message || "Something went wrong");
     } finally {
@@ -738,11 +739,14 @@ function App() {
 
   const toggleCard = (item) => {
     const id = item.id;
+    const nextIsFlipped = !Boolean(flippedCards[id]);
     setFlippedCards((prev) => ({
       ...prev,
       [id]: !prev[id],
     }));
-    void logFlashcardClick(item);
+    if (nextIsFlipped) {
+      void logFlashcardClick(item);
+    }
   };
 
   const areAllCardsFlipped = sentences.length > 0 && sentences.every((item) => Boolean(flippedCards[item.id]));
@@ -957,18 +961,6 @@ function App() {
 
   const rememberYesCount = testCards.filter((card) => testResults[card.id]?.remembered === true).length;
   const knowYesCount = testCards.filter((card) => testResults[card.id]?.known === true).length;
-  const dailyClickTotals = useMemo(() => {
-    const grouped = dailyClickStats.reduce((acc, row) => {
-      const dateKey = row.event_date;
-      acc[dateKey] = (acc[dateKey] || 0) + Number(row.total_clicks || 0);
-      return acc;
-    }, {});
-
-    return Object.entries(grouped)
-      .map(([eventDate, totalClicks]) => ({ event_date: eventDate, total_clicks: totalClicks }))
-      .sort((a, b) => (a.event_date < b.event_date ? 1 : -1));
-  }, [dailyClickStats]);
-
   const pageTitle =
     page === "dashboard"
       ? "Sentence Dashboard"
@@ -1444,49 +1436,28 @@ function App() {
           <div className="finance-area">
             <div className="finance-table-wrap">
               {statsLoading ? (
-                <div className="empty">Loading stats...</div>
-              ) : dailyClickTotals.length === 0 ? (
-                <div className="empty">No click stats in selected range.</div>
+                <div className="empty">Loading click history...</div>
+              ) : clickHistory.length === 0 ? (
+                <div className="empty">No click history in selected range.</div>
               ) : (
                 <table className="finance-table">
                   <thead>
                     <tr>
-                      <th>Date</th>
-                      <th>Total Clicks</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dailyClickTotals.map((row) => (
-                      <tr key={row.event_date}>
-                        <td>{row.event_date}</td>
-                        <td>{row.total_clicks}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            <div className="finance-table-wrap">
-              {statsLoading ? (
-                <div className="empty">Loading stats...</div>
-              ) : dailyClickStats.length === 0 ? (
-                <div className="empty">No language breakdown.</div>
-              ) : (
-                <table className="finance-table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
+                      <th>Event Time</th>
+                      <th>Flashcard ID</th>
                       <th>Back Lang</th>
-                      <th>Clicks</th>
+                      <th>Vietnamese</th>
+                      <th>English</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {dailyClickStats.map((row) => (
-                      <tr key={`${row.event_date}-${row.back_lang}`}>
-                        <td>{row.event_date}</td>
+                    {clickHistory.map((row) => (
+                      <tr key={row.id}>
+                        <td>{row.event_at}</td>
+                        <td>{row.flashcard_id}</td>
                         <td>{row.back_lang}</td>
-                        <td>{row.total_clicks}</td>
+                        <td>{row.vietnamese_sentence || "-"}</td>
+                        <td>{row.english_sentence || "-"}</td>
                       </tr>
                     ))}
                   </tbody>
