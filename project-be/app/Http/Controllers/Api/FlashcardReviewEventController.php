@@ -8,6 +8,7 @@ use App\Models\FlashcardReviewEvent;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class FlashcardReviewEventController extends Controller
 {
@@ -53,15 +54,16 @@ class FlashcardReviewEventController extends Controller
         $backLang = $validated['back_lang'] ?? null;
 
         $query = FlashcardReviewEvent::query()
-            ->selectRaw('event_date, back_lang, COUNT(*) as total_clicks')
-            ->whereBetween('event_date', [$startDate, $endDate]);
+            ->selectRaw('DATE(event_date) as event_date, back_lang, COUNT(*) as total_clicks')
+            ->whereDate('event_date', '>=', $startDate)
+            ->whereDate('event_date', '<=', $endDate);
 
         if (! empty($backLang) && $backLang !== 'all') {
             $query->where('back_lang', $backLang);
         }
 
         $items = $query
-            ->groupBy('event_date', 'back_lang')
+            ->groupBy(DB::raw('DATE(event_date)'), 'back_lang')
             ->orderByDesc('event_date')
             ->orderBy('back_lang')
             ->get()
