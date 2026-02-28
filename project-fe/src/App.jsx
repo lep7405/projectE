@@ -24,6 +24,7 @@ function App() {
     english_sentence: "",
     vietnamese_sentence: "",
     back_lang: "en",
+    created_at: new Date().toISOString().slice(0, 10),
     images: null,
     remove_image: false,
   });
@@ -31,6 +32,7 @@ function App() {
 
   const [bulkText, setBulkText] = useState("");
   const [bulkBackLang, setBulkBackLang] = useState("en");
+  const [bulkCreatedAt, setBulkCreatedAt] = useState(new Date().toISOString().slice(0, 10));
   const [bulkFiles, setBulkFiles] = useState([]);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
@@ -561,6 +563,7 @@ function App() {
       english_sentence: "",
       vietnamese_sentence: "",
       back_lang: "en",
+      created_at: new Date().toISOString().slice(0, 10),
       images: null,
       remove_image: false,
     });
@@ -573,6 +576,7 @@ function App() {
       english_sentence: item.english_sentence || "",
       vietnamese_sentence: item.vietnamese_sentence || "",
       back_lang: item.back_lang || "en",
+      created_at: (item.created_at || "").slice(0, 10) || new Date().toISOString().slice(0, 10),
       images: null,
       remove_image: false,
     });
@@ -586,6 +590,7 @@ function App() {
   const openBulkModal = () => {
     setBulkText("");
     setBulkBackLang("en");
+    setBulkCreatedAt(new Date().toISOString().slice(0, 10));
     setBulkFiles([]);
     setIsBulkModalOpen(true);
   };
@@ -619,6 +624,7 @@ function App() {
       payload.append("english_sentence", form.english_sentence);
       payload.append("vietnamese_sentence", form.vietnamese_sentence);
       payload.append("back_lang", form.back_lang);
+      if (!editingItem && form.created_at) payload.append("created_at", form.created_at);
       if (form.images) payload.append("images", form.images);
       if (form.remove_image) payload.append("remove_image", "1");
 
@@ -753,6 +759,7 @@ function App() {
         english_sentence: englishSentence,
         vietnamese_sentence: vietnameseSentence,
         back_lang: bulkBackLang,
+        created_at: bulkCreatedAt,
       };
 
       if (imageRef) {
@@ -1977,6 +1984,13 @@ function App() {
                 </select>
               </label>
 
+              {!editingItem ? (
+                <label>
+                  Created date
+                  <input type="date" name="created_at" value={form.created_at} onChange={handleInputChange} required />
+                </label>
+              ) : null}
+
               <label>
                 Image
                 <input type="file" accept="image/*" onChange={handleFileChange} />
@@ -2022,6 +2036,11 @@ function App() {
                       </option>
                     ))}
                 </select>
+              </label>
+
+              <label>
+                Created date
+                <input type="date" value={bulkCreatedAt} onChange={(e) => setBulkCreatedAt(e.target.value)} required />
               </label>
 
               <label>

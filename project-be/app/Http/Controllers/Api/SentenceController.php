@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Flashcard;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -53,10 +54,16 @@ class SentenceController extends Controller
             'back_lang' => ['nullable', 'string', 'max:10'],
             'topic' => ['nullable', 'string', 'max:120'],
             'images' => ['nullable', 'image', 'max:5120'],
+            'created_at' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
         ]);
 
         if ($request->hasFile('images')) {
             $validated['images'] = $request->file('images')->store('flashcards', 'public');
+        }
+        if (! empty($validated['created_at'])) {
+            $createdAt = Carbon::parse($validated['created_at'])->startOfDay();
+            $validated['created_at'] = $createdAt->toDateTimeString();
+            $validated['updated_at'] = $createdAt->toDateTimeString();
         }
 
         $payload = $this->buildFlashcardPayload($validated);
@@ -94,6 +101,7 @@ class SentenceController extends Controller
             'items.*.back_lang' => ['nullable', 'string', 'max:10'],
             'items.*.topic' => ['nullable', 'string', 'max:120'],
             'items.*.image_ref' => ['nullable', 'string'],
+            'items.*.created_at' => ['nullable', 'date_format:Y-m-d'],
         ])->validate();
 
         $storedImagesByName = [];
@@ -103,16 +111,19 @@ class SentenceController extends Controller
 
         $now = now();
         $rows = collect($validated['items'])
-            ->map(fn (array $item): array => [
-                'front_text' => $item['vietnamese_sentence'],
-                'back_text' => $item['english_sentence'],
-                'front_lang' => $item['front_lang'] ?? 'vi',
-                'back_lang' => $item['back_lang'] ?? 'en',
-                'topic' => $item['topic'] ?? null,
-                'images' => $this->resolveBulkImagePath($item['image_ref'] ?? null, $storedImagesByName),
-                'created_at' => $now,
-                'updated_at' => $now,
-            ])
+            ->map(function (array $item) use ($storedImagesByName, $now): array {
+                $createdAt = ! empty($item['created_at']) ? Carbon::parse($item['created_at'])->startOfDay() : $now;
+                return [
+                    'front_text' => $item['vietnamese_sentence'],
+                    'back_text' => $item['english_sentence'],
+                    'front_lang' => $item['front_lang'] ?? 'vi',
+                    'back_lang' => $item['back_lang'] ?? 'en',
+                    'topic' => $item['topic'] ?? null,
+                    'images' => $this->resolveBulkImagePath($item['image_ref'] ?? null, $storedImagesByName),
+                    'created_at' => $createdAt,
+                    'updated_at' => $createdAt,
+                ];
+            })
             ->all();
 
         DB::transaction(function () use ($rows): void {
@@ -234,6 +245,12 @@ class SentenceController extends Controller
             $payload['back_lang'] = $validated['back_lang'];
         } elseif ($current === null) {
             $payload['back_lang'] = 'en';
+        }
+        if (array_key_exists('created_at', $validated) && $current === null) {
+            $payload['created_at'] = $validated['created_at'];
+        }
+        if (array_key_exists('updated_at', $validated) && $current === null) {
+            $payload['updated_at'] = $validated['updated_at'];
         }
 
         return $payload;
