@@ -38,6 +38,7 @@ function App() {
 
   const [flippedCards, setFlippedCards] = useState({});
   const [speakingId, setSpeakingId] = useState(null);
+  const [isDashboardListening, setIsDashboardListening] = useState(false);
 
   const [testLimit, setTestLimit] = useState(20);
   const [testBackLang, setTestBackLang] = useState("en");
@@ -97,6 +98,10 @@ function App() {
   const presenceStartedAtRef = useRef(null);
   const presencePageRef = useRef("dashboard");
   const presenceHeartbeatRef = useRef(null);
+  const dashboardListenTimerRef = useRef(null);
+  const dashboardListenIndexRef = useRef(0);
+  const dashboardListenRunningRef = useRef(false);
+  const sentencesRef = useRef([]);
 
   const limitOptions = [10, 20, 50, 100, 200];
   const backLangOptions = [
@@ -444,11 +449,20 @@ function App() {
 
   useEffect(() => {
     return () => {
+      dashboardListenRunningRef.current = false;
+      if (dashboardListenTimerRef.current) {
+        window.clearTimeout(dashboardListenTimerRef.current);
+        dashboardListenTimerRef.current = null;
+      }
       if ("speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }
     };
   }, []);
+
+  useEffect(() => {
+    sentencesRef.current = sentences;
+  }, [sentences]);
 
   useEffect(() => {
     if (!testStartedAt) return;
@@ -482,8 +496,11 @@ function App() {
         setError(err.message || "Something went wrong");
       });
     }
+    if (page !== "dashboard" && isDashboardListening) {
+      stopDashboardListening();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
+  }, [page, isDashboardListening]);
 
   useEffect(() => {
     // Close old page segment, then continue tracking with new page.
@@ -1101,6 +1118,83 @@ function App() {
     window.speechSynthesis.speak(utterance);
   };
 
+  const clearDashboardListenTimer = () => {
+    if (dashboardListenTimerRef.current) {
+      window.clearTimeout(dashboardListenTimerRef.current);
+      dashboardListenTimerRef.current = null;
+    }
+  };
+
+  const stopDashboardListening = () => {
+    dashboardListenRunningRef.current = false;
+    clearDashboardListenTimer();
+    setIsDashboardListening(false);
+    setSpeakingId(null);
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+  };
+
+  const speakDashboardLoopAt = (index) => {
+    if (!dashboardListenRunningRef.current) return;
+    const list = sentencesRef.current || [];
+    if (list.length === 0) {
+      stopDashboardListening();
+      return;
+    }
+
+    const safeIndex = ((index % list.length) + list.length) % list.length;
+    const item = list[safeIndex];
+    const text = item?.english_sentence || item?.back_text || "";
+    if (!text.trim()) {
+      dashboardListenIndexRef.current = (safeIndex + 1) % list.length;
+      dashboardListenTimerRef.current = window.setTimeout(() => speakDashboardLoopAt(dashboardListenIndexRef.current), 10000);
+      return;
+    }
+
+    if (!("speechSynthesis" in window)) {
+      setError("Your browser does not support speech.");
+      stopDashboardListening();
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    const speechLang = resolveSpeechLang(item.back_lang);
+    utterance.lang = speechLang;
+    const voice = pickVoiceByLang(speechLang);
+    if (voice) utterance.voice = voice;
+    utterance.rate = 0.7;
+    utterance.onend = () => {
+      if (!dashboardListenRunningRef.current) return;
+      dashboardListenIndexRef.current = (safeIndex + 1) % list.length;
+      dashboardListenTimerRef.current = window.setTimeout(() => speakDashboardLoopAt(dashboardListenIndexRef.current), 10000);
+    };
+    utterance.onerror = () => {
+      if (!dashboardListenRunningRef.current) return;
+      dashboardListenIndexRef.current = (safeIndex + 1) % list.length;
+      dashboardListenTimerRef.current = window.setTimeout(() => speakDashboardLoopAt(dashboardListenIndexRef.current), 10000);
+    };
+    setSpeakingId(item.id);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const toggleDashboardListening = () => {
+    if (isDashboardListening) {
+      stopDashboardListening();
+      return;
+    }
+    if (sentencesRef.current.length === 0) {
+      setError("No sentences to listen.");
+      return;
+    }
+    setError("");
+    dashboardListenRunningRef.current = true;
+    dashboardListenIndexRef.current = 0;
+    setIsDashboardListening(true);
+    speakDashboardLoopAt(0);
+  };
+
   const startTest = async () => {
     setTestLoading(true);
     setError("");
@@ -1349,6 +1443,9 @@ function App() {
             </button>
             <button className="btn" onClick={toggleAllCards}>
               {areAllCardsFlipped ? "Show Front" : "Flip All"}
+            </button>
+            <button className={`btn ${isDashboardListening ? "btn-danger" : ""}`} onClick={toggleDashboardListening}>
+              {isDashboardListening ? "Stop Listen" : "Listen"}
             </button>
             <button className="btn" onClick={() => loadSentences(limit, backLang)}>
               Refresh
