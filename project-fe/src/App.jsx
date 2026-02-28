@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
 function App() {
@@ -80,9 +80,14 @@ function App() {
   const [taskSubmitting, setTaskSubmitting] = useState(false);
   const [clickHistory, setClickHistory] = useState([]);
   const [statsLoading, setStatsLoading] = useState(false);
+  const [presenceLoading, setPresenceLoading] = useState(false);
+  const [presenceDailyStats, setPresenceDailyStats] = useState([]);
   const [statsBackLang, setStatsBackLang] = useState("all");
   const [statsStartDate, setStatsStartDate] = useState(weekAgoYmd);
   const [statsEndDate, setStatsEndDate] = useState(todayYmd);
+  const presenceStartedAtRef = useRef(null);
+  const presencePageRef = useRef("dashboard");
+  const presenceHeartbeatRef = useRef(null);
 
   const limitOptions = [10, 20, 50, 100, 200];
   const backLangOptions = [
@@ -110,6 +115,15 @@ function App() {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  };
+
+  const formatDurationLong = (ms) => {
+    const safeMs = Math.max(0, Number(ms) || 0);
+    const totalSeconds = Math.floor(safeMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   };
 
   const fetchSentences = async (currentLimit, currentBackLang, currentCreatedDate = "") => {
@@ -201,6 +215,65 @@ function App() {
     }
   };
 
+  const loadPresenceStats = async (currentStartDate = statsStartDate, currentEndDate = statsEndDate) => {
+    setPresenceLoading(true);
+    setError("");
+    try {
+      const params = new URLSearchParams();
+      if (currentStartDate) params.set("start_date", currentStartDate);
+      if (currentEndDate) params.set("end_date", currentEndDate);
+
+      const res = await fetch(`${apiBaseUrl}/presence/stats/daily?${params.toString()}`);
+      if (!res.ok) throw new Error("Cannot load active time stats");
+      const data = await res.json();
+      setPresenceDailyStats(data.data || []);
+    } catch (err) {
+      setError(err.message || "Something went wrong");
+    } finally {
+      setPresenceLoading(false);
+    }
+  };
+
+  const sendPresenceHeartbeat = (activeMs, pageName, useBeacon = false) => {
+    if (!activeMs || activeMs < 1000) return;
+    const payload = JSON.stringify({
+      page: pageName,
+      active_ms: Math.round(activeMs),
+      recorded_at: new Date().toISOString(),
+    });
+
+    if (useBeacon && navigator.sendBeacon) {
+      const blob = new Blob([payload], { type: "application/json" });
+      navigator.sendBeacon(`${apiBaseUrl}/presence/heartbeat`, blob);
+      return;
+    }
+
+    fetch(`${apiBaseUrl}/presence/heartbeat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: payload,
+    }).catch(() => {});
+  };
+
+  const flushPresence = (useBeacon = false) => {
+    if (!presenceStartedAtRef.current) return;
+    const now = Date.now();
+    const activeMs = now - presenceStartedAtRef.current;
+    const pageName = presencePageRef.current || "dashboard";
+    presenceStartedAtRef.current = null;
+    sendPresenceHeartbeat(activeMs, pageName, useBeacon);
+  };
+
+  const startPresence = () => {
+    const isVisible = document.visibilityState === "visible";
+    const isFocused = document.hasFocus();
+    if (!isVisible || !isFocused) return;
+    if (presenceStartedAtRef.current) return;
+    presenceStartedAtRef.current = Date.now();
+  };
+
   const resetFinanceForm = () => {
     setEditingFinanceId(null);
     setFinanceForm({
@@ -265,7 +338,7 @@ function App() {
       });
     }
     if (page === "stats") {
-      loadClickStats().catch((err) => {
+      Promise.all([loadClickStats(), loadPresenceStats()]).catch((err) => {
         setError(err.message || "Something went wrong");
       });
     }
@@ -276,6 +349,60 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
+
+  useEffect(() => {
+    // Close old page segment, then continue tracking with new page.
+    flushPresence(false);
+    presencePageRef.current = page;
+    startPresence();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
+
+  useEffect(() => {
+    presencePageRef.current = page;
+    startPresence();
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        flushPresence(false);
+        return;
+      }
+      startPresence();
+    };
+    const onFocus = () => startPresence();
+    const onBlur = () => flushPresence(false);
+    const onPageHide = () => flushPresence(true);
+    const onBeforeUnload = () => flushPresence(true);
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("beforeunload", onBeforeUnload);
+
+    presenceHeartbeatRef.current = window.setInterval(() => {
+      if (!presenceStartedAtRef.current) return;
+      const now = Date.now();
+      const activeMs = now - presenceStartedAtRef.current;
+      if (activeMs < 1000) return;
+      presenceStartedAtRef.current = now;
+      sendPresenceHeartbeat(activeMs, presencePageRef.current, false);
+    }, 15000);
+
+    return () => {
+      if (presenceHeartbeatRef.current) {
+        window.clearInterval(presenceHeartbeatRef.current);
+        presenceHeartbeatRef.current = null;
+      }
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      flushPresence(true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openCreateModal = () => {
     setEditingItem(null);
@@ -411,13 +538,17 @@ function App() {
   const onStatsStartDateChange = (e) => {
     const value = e.target.value || "";
     setStatsStartDate(value);
-    loadClickStats(value, statsEndDate, statsBackLang);
+    Promise.all([loadClickStats(value, statsEndDate, statsBackLang), loadPresenceStats(value, statsEndDate)]).catch((err) => {
+      setError(err.message || "Something went wrong");
+    });
   };
 
   const onStatsEndDateChange = (e) => {
     const value = e.target.value || "";
     setStatsEndDate(value);
-    loadClickStats(statsStartDate, value, statsBackLang);
+    Promise.all([loadClickStats(statsStartDate, value, statsBackLang), loadPresenceStats(statsStartDate, value)]).catch((err) => {
+      setError(err.message || "Something went wrong");
+    });
   };
 
   const onStatsBackLangChange = (e) => {
@@ -961,6 +1092,22 @@ function App() {
 
   const rememberYesCount = testCards.filter((card) => testResults[card.id]?.remembered === true).length;
   const knowYesCount = testCards.filter((card) => testResults[card.id]?.known === true).length;
+  const presenceDailyTotals = useMemo(() => {
+    const grouped = presenceDailyStats.reduce((acc, row) => {
+      const key = row.event_date;
+      acc[key] = (acc[key] || 0) + Number(row.total_active_ms || 0);
+      return acc;
+    }, {});
+
+    return Object.entries(grouped)
+      .map(([eventDate, totalActiveMs]) => ({ event_date: eventDate, total_active_ms: totalActiveMs }))
+      .sort((a, b) => (a.event_date < b.event_date ? 1 : -1));
+  }, [presenceDailyStats]);
+  const todayActiveMs = useMemo(() => {
+    const row = presenceDailyTotals.find((item) => item.event_date === todayYmd);
+    return Number(row?.total_active_ms || 0);
+  }, [presenceDailyTotals, todayYmd]);
+
   const pageTitle =
     page === "dashboard"
       ? "Sentence Dashboard"
@@ -1090,7 +1237,14 @@ function App() {
                 </option>
               ))}
             </select>
-            <button className="btn" onClick={() => loadClickStats(statsStartDate, statsEndDate, statsBackLang)}>
+            <button
+              className="btn"
+              onClick={() =>
+                Promise.all([loadClickStats(statsStartDate, statsEndDate, statsBackLang), loadPresenceStats(statsStartDate, statsEndDate)]).catch(
+                  (err) => setError(err.message || "Something went wrong")
+                )
+              }
+            >
               Refresh Stats
             </button>
           </div>
@@ -1434,6 +1588,64 @@ function App() {
           </div>
         ) : page === "stats" ? (
           <div className="finance-area">
+            <div className="test-stats">
+              <div>
+                Active Today ({todayYmd}): {presenceLoading ? "Loading..." : formatDurationLong(todayActiveMs)}
+              </div>
+            </div>
+
+            <div className="finance-table-wrap">
+              {presenceLoading ? (
+                <div className="empty">Loading active time...</div>
+              ) : presenceDailyTotals.length === 0 ? (
+                <div className="empty">No active-time data in selected range.</div>
+              ) : (
+                <table className="finance-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Total Active Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {presenceDailyTotals.map((row) => (
+                      <tr key={row.event_date}>
+                        <td>{row.event_date}</td>
+                        <td>{formatDurationLong(row.total_active_ms)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="finance-table-wrap">
+              {presenceLoading ? (
+                <div className="empty">Loading active-time breakdown...</div>
+              ) : presenceDailyStats.length === 0 ? (
+                <div className="empty">No page breakdown in selected range.</div>
+              ) : (
+                <table className="finance-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Page</th>
+                      <th>Active Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {presenceDailyStats.map((row, idx) => (
+                      <tr key={`${row.event_date}-${row.page}-${idx}`}>
+                        <td>{row.event_date}</td>
+                        <td>{row.page}</td>
+                        <td>{formatDurationLong(row.total_active_ms)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
             <div className="finance-table-wrap">
               {statsLoading ? (
                 <div className="empty">Loading click history...</div>

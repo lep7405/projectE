@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\DailyFinanceController;
 use App\Http\Controllers\Api\FlashcardReviewEventController;
+use App\Http\Controllers\Api\PresenceController;
 use App\Http\Controllers\Api\SentenceController;
 use App\Http\Controllers\Api\TaskController;
 use App\Http\Controllers\Api\TestHistoryController;
@@ -37,3 +38,6 @@ Route::delete('/tasks/{task}', [TaskController::class, 'destroy']);
 Route::post('/flashcard-review-events', [FlashcardReviewEventController::class, 'store']);
 Route::get('/flashcard-review-events', [FlashcardReviewEventController::class, 'index']);
 Route::get('/flashcard-review-events/stats/daily', [FlashcardReviewEventController::class, 'dailyStats']);
+
+Route::post('/presence/heartbeat', [PresenceController::class, 'heartbeat']);
+Route::get('/presence/stats/daily', [PresenceController::class, 'dailyStats']);
