@@ -15,5 +15,10 @@ class Flashcard extends Model
         'back_lang',
         'images',
         'topic',
+        'is_paragraph',
+    ];
+
+    protected $casts = [
+        'is_paragraph' => 'boolean',
     ];
 }

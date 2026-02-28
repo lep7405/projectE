@@ -18,12 +18,14 @@ class SentenceController extends Controller
         $request->validate([
             'back_lang' => ['sometimes', 'nullable', 'string', 'max:10'],
             'created_date' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+            'is_paragraph' => ['sometimes', 'nullable', 'boolean'],
         ]);
 
         $limit = (int) $request->query('limit', 10);
         $limit = max(1, min($limit, 200));
         $backLang = $request->query('back_lang');
         $createdDate = $request->query('created_date');
+        $isParagraph = $request->query('is_paragraph');
 
         $query = Flashcard::query();
         if (! empty($backLang)) {
@@ -31,6 +33,9 @@ class SentenceController extends Controller
         }
         if (! empty($createdDate)) {
             $query->whereDate('created_at', $createdDate);
+        }
+        if ($isParagraph !== null && $isParagraph !== '') {
+            $query->where('is_paragraph', filter_var($isParagraph, FILTER_VALIDATE_BOOLEAN));
         }
 
         $sentences = $query
@@ -55,6 +60,7 @@ class SentenceController extends Controller
             'topic' => ['nullable', 'string', 'max:120'],
             'images' => ['nullable', 'image', 'max:5120'],
             'created_at' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+            'is_paragraph' => ['sometimes', 'nullable', 'boolean'],
         ]);
 
         if ($request->hasFile('images')) {
@@ -102,6 +108,7 @@ class SentenceController extends Controller
             'items.*.topic' => ['nullable', 'string', 'max:120'],
             'items.*.image_ref' => ['nullable', 'string'],
             'items.*.created_at' => ['nullable', 'date_format:Y-m-d'],
+            'items.*.is_paragraph' => ['nullable', 'boolean'],
         ])->validate();
 
         $storedImagesByName = [];
@@ -119,6 +126,7 @@ class SentenceController extends Controller
                     'front_lang' => $item['front_lang'] ?? 'vi',
                     'back_lang' => $item['back_lang'] ?? 'en',
                     'topic' => $item['topic'] ?? null,
+                    'is_paragraph' => (bool) ($item['is_paragraph'] ?? false),
                     'images' => $this->resolveBulkImagePath($item['image_ref'] ?? null, $storedImagesByName),
                     'created_at' => $createdAt,
                     'updated_at' => $createdAt,
@@ -164,6 +172,7 @@ class SentenceController extends Controller
             'front_lang' => ['sometimes', 'required', 'string', 'max:10'],
             'back_lang' => ['sometimes', 'required', 'string', 'max:10'],
             'topic' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'is_paragraph' => ['sometimes', 'boolean'],
             'images' => ['nullable', 'image', 'max:5120'],
             'remove_image' => ['sometimes', 'boolean'],
         ]);
@@ -246,6 +255,11 @@ class SentenceController extends Controller
         } elseif ($current === null) {
             $payload['back_lang'] = 'en';
         }
+        if (array_key_exists('is_paragraph', $validated)) {
+            $payload['is_paragraph'] = (bool) $validated['is_paragraph'];
+        } elseif ($current === null) {
+            $payload['is_paragraph'] = false;
+        }
         if (array_key_exists('created_at', $validated) && $current === null) {
             $payload['created_at'] = $validated['created_at'];
         }
@@ -266,6 +280,7 @@ class SentenceController extends Controller
             'front_lang' => $flashcard->front_lang,
             'back_lang' => $flashcard->back_lang,
             'topic' => $flashcard->topic,
+            'is_paragraph' => (bool) $flashcard->is_paragraph,
             'english_sentence' => $flashcard->back_text,
             'vietnamese_sentence' => $flashcard->front_text,
             'created_at' => $flashcard->created_at,

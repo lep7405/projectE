@@ -11,6 +11,7 @@ function App() {
 
   const [limit, setLimit] = useState(10);
   const [backLang, setBackLang] = useState("all");
+  const [paragraphFilter, setParagraphFilter] = useState("all");
   const [dashboardDate, setDashboardDate] = useState("");
   const [sentences, setSentences] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -24,6 +25,7 @@ function App() {
     english_sentence: "",
     vietnamese_sentence: "",
     back_lang: "en",
+    is_paragraph: false,
     created_at: new Date().toISOString().slice(0, 10),
     images: null,
     remove_image: false,
@@ -32,6 +34,7 @@ function App() {
 
   const [bulkText, setBulkText] = useState("");
   const [bulkBackLang, setBulkBackLang] = useState("en");
+  const [bulkIsParagraph, setBulkIsParagraph] = useState(false);
   const [bulkCreatedAt, setBulkCreatedAt] = useState(new Date().toISOString().slice(0, 10));
   const [bulkFiles, setBulkFiles] = useState([]);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
@@ -142,7 +145,7 @@ function App() {
     return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   };
 
-  const fetchSentences = async (currentLimit, currentBackLang, currentCreatedDate = "") => {
+  const fetchSentences = async (currentLimit, currentBackLang, currentCreatedDate = "", currentParagraphFilter = paragraphFilter) => {
     const params = new URLSearchParams();
     params.set("limit", String(currentLimit));
     if (currentCreatedDate) {
@@ -150,6 +153,11 @@ function App() {
     }
     if (currentBackLang && currentBackLang !== "all") {
       params.set("back_lang", currentBackLang);
+    }
+    if (currentParagraphFilter === "yes") {
+      params.set("is_paragraph", "1");
+    } else if (currentParagraphFilter === "no") {
+      params.set("is_paragraph", "0");
     }
 
     const res = await fetch(`${apiBaseUrl}/sentences?${params.toString()}`);
@@ -160,11 +168,16 @@ function App() {
     return data.data || [];
   };
 
-  const loadSentences = async (currentLimit = limit, currentBackLang = backLang, currentCreatedDate = dashboardDate) => {
+  const loadSentences = async (
+    currentLimit = limit,
+    currentBackLang = backLang,
+    currentCreatedDate = dashboardDate,
+    currentParagraphFilter = paragraphFilter
+  ) => {
     setLoading(true);
     setError("");
     try {
-      const data = await fetchSentences(currentLimit, currentBackLang, currentCreatedDate);
+      const data = await fetchSentences(currentLimit, currentBackLang, currentCreatedDate, currentParagraphFilter);
       setSentences(data);
       setFlippedCards({});
     } catch (err) {
@@ -582,6 +595,7 @@ function App() {
       english_sentence: "",
       vietnamese_sentence: "",
       back_lang: "en",
+      is_paragraph: false,
       created_at: new Date().toISOString().slice(0, 10),
       images: null,
       remove_image: false,
@@ -595,6 +609,7 @@ function App() {
       english_sentence: item.english_sentence || "",
       vietnamese_sentence: item.vietnamese_sentence || "",
       back_lang: item.back_lang || "en",
+      is_paragraph: Boolean(item.is_paragraph),
       created_at: (item.created_at || "").slice(0, 10) || new Date().toISOString().slice(0, 10),
       images: null,
       remove_image: false,
@@ -609,6 +624,7 @@ function App() {
   const openBulkModal = () => {
     setBulkText("");
     setBulkBackLang("en");
+    setBulkIsParagraph(false);
     setBulkCreatedAt(new Date().toISOString().slice(0, 10));
     setBulkFiles([]);
     setIsBulkModalOpen(true);
@@ -619,8 +635,8 @@ function App() {
   };
 
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
+    const { name, value, type, checked } = e.target;
+    setForm((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
   };
 
   const handleFileChange = (e) => {
@@ -643,6 +659,7 @@ function App() {
       payload.append("english_sentence", form.english_sentence);
       payload.append("vietnamese_sentence", form.vietnamese_sentence);
       payload.append("back_lang", form.back_lang);
+      payload.append("is_paragraph", form.is_paragraph ? "1" : "0");
       if (!editingItem && form.created_at) payload.append("created_at", form.created_at);
       if (form.images) payload.append("images", form.images);
       if (form.remove_image) payload.append("remove_image", "1");
@@ -691,24 +708,30 @@ function App() {
   const onLimitChange = (e) => {
     const nextLimit = Number(e.target.value) || 10;
     setLimit(nextLimit);
-    loadSentences(nextLimit, backLang);
+    loadSentences(nextLimit, backLang, dashboardDate, paragraphFilter);
   };
 
   const onBackLangChange = (e) => {
     const nextBackLang = e.target.value;
     setBackLang(nextBackLang);
-    loadSentences(limit, nextBackLang, dashboardDate);
+    loadSentences(limit, nextBackLang, dashboardDate, paragraphFilter);
   };
 
   const onDashboardDateChange = (e) => {
     const nextDate = e.target.value || "";
     setDashboardDate(nextDate);
-    loadSentences(limit, backLang, nextDate);
+    loadSentences(limit, backLang, nextDate, paragraphFilter);
   };
 
   const clearDashboardDateFilter = () => {
     setDashboardDate("");
-    loadSentences(limit, backLang, "");
+    loadSentences(limit, backLang, "", paragraphFilter);
+  };
+
+  const onParagraphFilterChange = (e) => {
+    const nextValue = e.target.value;
+    setParagraphFilter(nextValue);
+    loadSentences(limit, backLang, dashboardDate, nextValue);
   };
 
   const onStatsStartDateChange = (e) => {
@@ -778,6 +801,7 @@ function App() {
         english_sentence: englishSentence,
         vietnamese_sentence: vietnameseSentence,
         back_lang: bulkBackLang,
+        is_paragraph: bulkIsParagraph,
         created_at: bulkCreatedAt,
       };
 
@@ -1444,6 +1468,12 @@ function App() {
                 </option>
               ))}
             </select>
+            <label htmlFor="paragraph-filter">Paragraph</label>
+            <select id="paragraph-filter" value={paragraphFilter} onChange={onParagraphFilterChange}>
+              <option value="all">All</option>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+            </select>
             <label htmlFor="dashboard-date">Date</label>
             <input id="dashboard-date" type="date" value={dashboardDate} onChange={onDashboardDateChange} />
             <button className="btn" onClick={clearDashboardDateFilter} disabled={!dashboardDate}>
@@ -1594,6 +1624,7 @@ function App() {
                           </button>
                         </div>
                         <p className="card-text">{item.english_sentence}</p>
+                        <p className="muted">Paragraph: {item.is_paragraph ? "Yes" : "No"}</p>
                         {item.images ? <img src={imageUrl(item.images)} alt="sentence" className="flash-image" /> : <p className="muted">No image</p>}
                         <div className="actions" onClick={(e) => e.stopPropagation()}>
                           <button className="btn btn-edit" onClick={() => openEditModal(item)}>
@@ -2108,6 +2139,10 @@ function App() {
                     ))}
                 </select>
               </label>
+              <label className="checkbox-line">
+                <input type="checkbox" name="is_paragraph" checked={Boolean(form.is_paragraph)} onChange={handleInputChange} />
+                Is paragraph?
+              </label>
 
               {!editingItem ? (
                 <label>
@@ -2166,6 +2201,10 @@ function App() {
               <label>
                 Created date
                 <input type="date" value={bulkCreatedAt} onChange={(e) => setBulkCreatedAt(e.target.value)} required />
+              </label>
+              <label className="checkbox-line">
+                <input type="checkbox" checked={bulkIsParagraph} onChange={(e) => setBulkIsParagraph(e.target.checked)} />
+                Is paragraph?
               </label>
 
               <label>
