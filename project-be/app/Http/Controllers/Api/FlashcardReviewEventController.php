@@ -25,11 +25,21 @@ class FlashcardReviewEventController extends Controller
         $startDate = Carbon::parse($endDate)->subDays($days - 1)->toDateString();
         $backLang = $validated['back_lang'] ?? null;
 
-        $flashcardQuery = Flashcard::query();
+        $createdQuery = Flashcard::query()
+            ->selectRaw('DATE(created_at) as created_date, COUNT(*) as total_created')
+            ->whereDate('created_at', '<=', $endDate);
         if (! empty($backLang) && $backLang !== 'all') {
-            $flashcardQuery->where('back_lang', $backLang);
+            $createdQuery->where('back_lang', $backLang);
         }
-        $totalWords = $flashcardQuery->count();
+        $createdByDate = $createdQuery
+            ->groupBy(DB::raw('DATE(created_at)'))
+            ->orderBy('created_date')
+            ->get()
+            ->map(fn ($row): array => [
+                'created_date' => (string) $row->created_date,
+                'total_created' => (int) $row->total_created,
+            ])
+            ->values();
 
         $eventQuery = FlashcardReviewEvent::query()
             ->selectRaw('DATE(event_date) as event_date, COUNT(DISTINCT flashcard_id) as learned_count')
@@ -45,14 +55,20 @@ class FlashcardReviewEventController extends Controller
             ->pluck('learned_count', 'event_date');
 
         $series = collect();
+        $cumulativeTotalWords = 0;
+        $createdIndex = 0;
         for ($offset = 0; $offset < $days; $offset++) {
             $date = Carbon::parse($startDate)->addDays($offset)->toDateString();
+            while ($createdIndex < $createdByDate->count() && $createdByDate[$createdIndex]['created_date'] <= $date) {
+                $cumulativeTotalWords += (int) $createdByDate[$createdIndex]['total_created'];
+                $createdIndex++;
+            }
             $learnedCount = (int) ($learnedByDate[$date] ?? 0);
             $series->push([
                 'event_date' => $date,
                 'learned_count' => $learnedCount,
-                'total_words' => $totalWords,
-                'unlearned_count' => max(0, $totalWords - $learnedCount),
+                'total_words' => $cumulativeTotalWords,
+                'unlearned_count' => max(0, $cumulativeTotalWords - $learnedCount),
             ]);
         }
 
@@ -63,7 +79,7 @@ class FlashcardReviewEventController extends Controller
                 'end_date' => $endDate,
                 'days' => $days,
                 'back_lang' => $backLang ?? 'all',
-                'total_words' => $totalWords,
+                'total_words_latest' => $series->last()['total_words'] ?? 0,
             ],
         ]);
     }
