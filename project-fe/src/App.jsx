@@ -39,6 +39,8 @@ function App() {
   const [flippedCards, setFlippedCards] = useState({});
   const [speakingId, setSpeakingId] = useState(null);
   const [isDashboardListening, setIsDashboardListening] = useState(false);
+  const [listenRate, setListenRate] = useState(0.7);
+  const [listenGapSec, setListenGapSec] = useState(10);
 
   const [testLimit, setTestLimit] = useState(20);
   const [testBackLang, setTestBackLang] = useState("en");
@@ -1148,7 +1150,7 @@ function App() {
     const text = item?.english_sentence || item?.back_text || "";
     if (!text.trim()) {
       dashboardListenIndexRef.current = (safeIndex + 1) % list.length;
-      dashboardListenTimerRef.current = window.setTimeout(() => speakDashboardLoopAt(dashboardListenIndexRef.current), 10000);
+      dashboardListenTimerRef.current = window.setTimeout(() => speakDashboardLoopAt(dashboardListenIndexRef.current), Math.max(1, listenGapSec) * 1000);
       return;
     }
 
@@ -1164,16 +1166,22 @@ function App() {
     utterance.lang = speechLang;
     const voice = pickVoiceByLang(speechLang);
     if (voice) utterance.voice = voice;
-    utterance.rate = 0.7;
+    utterance.rate = Math.max(0.5, Math.min(2, Number(listenRate) || 0.7));
     utterance.onend = () => {
       if (!dashboardListenRunningRef.current) return;
       dashboardListenIndexRef.current = (safeIndex + 1) % list.length;
-      dashboardListenTimerRef.current = window.setTimeout(() => speakDashboardLoopAt(dashboardListenIndexRef.current), 10000);
+      dashboardListenTimerRef.current = window.setTimeout(
+        () => speakDashboardLoopAt(dashboardListenIndexRef.current),
+        Math.max(1, Number(listenGapSec) || 10) * 1000
+      );
     };
     utterance.onerror = () => {
       if (!dashboardListenRunningRef.current) return;
       dashboardListenIndexRef.current = (safeIndex + 1) % list.length;
-      dashboardListenTimerRef.current = window.setTimeout(() => speakDashboardLoopAt(dashboardListenIndexRef.current), 10000);
+      dashboardListenTimerRef.current = window.setTimeout(
+        () => speakDashboardLoopAt(dashboardListenIndexRef.current),
+        Math.max(1, Number(listenGapSec) || 10) * 1000
+      );
     };
     setSpeakingId(item.id);
     window.speechSynthesis.speak(utterance);
@@ -1447,6 +1455,26 @@ function App() {
             <button className={`btn ${isDashboardListening ? "btn-danger" : ""}`} onClick={toggleDashboardListening}>
               {isDashboardListening ? "Stop Listen" : "Listen"}
             </button>
+            <label htmlFor="listen-rate">Rate</label>
+            <input
+              id="listen-rate"
+              type="number"
+              min="0.5"
+              max="2"
+              step="0.1"
+              value={listenRate}
+              onChange={(e) => setListenRate(Number(e.target.value) || 0.7)}
+            />
+            <label htmlFor="listen-gap">Gap (s)</label>
+            <input
+              id="listen-gap"
+              type="number"
+              min="1"
+              max="120"
+              step="1"
+              value={listenGapSec}
+              onChange={(e) => setListenGapSec(Math.max(1, Number(e.target.value) || 10))}
+            />
             <button className="btn" onClick={() => loadSentences(limit, backLang)}>
               Refresh
             </button>
