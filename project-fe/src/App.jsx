@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { jsPDF } from "jspdf";
 import "./App.css";
 
 function App() {
@@ -281,78 +280,6 @@ function App() {
     } finally {
       setDayDetailLoading(false);
     }
-  };
-
-  const downloadUnlearnedPdf = async () => {
-    const rows = learningDayDetail.unlearned_words || [];
-    const doc = new jsPDF({ unit: "pt", format: "a4", compress: true });
-    const cleanText = (value) =>
-      String(value ?? "-")
-        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
-        .trim();
-    const escapeHtml = (value) =>
-      cleanText(value)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-
-    const mount = document.createElement("div");
-    mount.style.position = "fixed";
-    mount.style.left = "-10000px";
-    mount.style.top = "0";
-    mount.style.width = "760px";
-    mount.style.padding = "16px";
-    mount.style.background = "#ffffff";
-    mount.style.color = "#111111";
-    mount.style.fontFamily = "'Noto Sans JP','Noto Sans CJK JP','Segoe UI','Arial Unicode MS',sans-serif";
-    mount.innerHTML = `
-      <h2 style="margin:0 0 8px 0;">Unlearned Words - ${escapeHtml(selectedLearningDay || statsEndDate)}</h2>
-      <p style="margin:0 0 4px 0;">Back Lang: ${escapeHtml(statsBackLang)}</p>
-      <p style="margin:0 0 12px 0;">Total: ${rows.length}</p>
-      <table style="width:100%;border-collapse:collapse;font-size:12px;">
-        <thead>
-          <tr>
-            <th style="border:1px solid #ccc;padding:6px;text-align:left;">#</th>
-            <th style="border:1px solid #ccc;padding:6px;text-align:left;">ID</th>
-            <th style="border:1px solid #ccc;padding:6px;text-align:left;">Vietnamese</th>
-            <th style="border:1px solid #ccc;padding:6px;text-align:left;">English</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows
-            .map(
-              (row, idx) => `
-            <tr>
-              <td style="border:1px solid #ddd;padding:6px;vertical-align:top;">${idx + 1}</td>
-              <td style="border:1px solid #ddd;padding:6px;vertical-align:top;">${escapeHtml(row.flashcard_id)}</td>
-              <td style="border:1px solid #ddd;padding:6px;vertical-align:top;">${escapeHtml(row.vietnamese_sentence)}</td>
-              <td style="border:1px solid #ddd;padding:6px;vertical-align:top;">${escapeHtml(row.english_sentence)}</td>
-            </tr>
-          `
-            )
-            .join("")}
-        </tbody>
-      </table>
-    `;
-    document.body.appendChild(mount);
-
-    await doc.html(mount, {
-      x: 20,
-      y: 20,
-      width: 555,
-      windowWidth: 760,
-      autoPaging: "text",
-      html2canvas: {
-        scale: 1,
-        useCORS: true,
-      },
-    });
-    mount.remove();
-
-    const safeDate = (selectedLearningDay || statsEndDate || "date").replace(/[^0-9-]/g, "");
-    doc.save(`unlearned-words-${safeDate}.pdf`);
   };
 
   const downloadUnlearnedCsv = () => {
@@ -2148,9 +2075,6 @@ function App() {
                       </button>
                       <button className="btn" type="button" onClick={downloadUnlearnedDoc} disabled={!learningDayDetail.unlearned_words?.length}>
                         Word (.doc)
-                      </button>
-                      <button className="btn" type="button" onClick={downloadUnlearnedPdf} disabled={!learningDayDetail.unlearned_words?.length}>
-                        PDF
                       </button>
                     </div>
                   </div>
