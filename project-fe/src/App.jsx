@@ -91,6 +91,7 @@ function App() {
   const [statsBackLang, setStatsBackLang] = useState("all");
   const [statsStartDate, setStatsStartDate] = useState(weekAgoYmd);
   const [statsEndDate, setStatsEndDate] = useState(todayYmd);
+  const [presenceNow, setPresenceNow] = useState(Date.now());
   const presenceStartedAtRef = useRef(null);
   const presencePageRef = useRef("dashboard");
   const presenceHeartbeatRef = useRef(null);
@@ -519,7 +520,7 @@ function App() {
       if (activeMs < 1000) return;
       presenceStartedAtRef.current = now;
       sendPresenceHeartbeat(activeMs, presencePageRef.current, false);
-    }, 15000);
+    }, 5000);
 
     return () => {
       if (presenceHeartbeatRef.current) {
@@ -535,6 +536,24 @@ function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setPresenceNow(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (page !== "stats") return;
+    const timer = window.setInterval(() => {
+      loadPresenceStats(statsStartDate, statsEndDate).catch((err) => {
+        setError(err.message || "Something went wrong");
+      });
+    }, 5000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, statsStartDate, statsEndDate]);
 
   const openCreateModal = () => {
     setEditingItem(null);
@@ -1243,9 +1262,18 @@ function App() {
     const row = presenceDailyTotals.find((item) => item.event_date === todayYmd);
     return Number(row?.total_active_ms || 0);
   }, [presenceDailyTotals, todayYmd]);
+  const todayActiveLiveMs = useMemo(() => {
+    const startedAt = presenceStartedAtRef.current;
+    if (!startedAt) return todayActiveMs;
+    const pendingMs = Math.max(0, presenceNow - startedAt);
+    return todayActiveMs + pendingMs;
+  }, [todayActiveMs, presenceNow]);
   const learningChartMax = useMemo(() => {
     if (learningSeries.length === 0) return 1;
-    return Math.max(...learningSeries.map((row) => Number(row.total_words || 0)), 1);
+    return Math.max(
+      ...learningSeries.map((row) => Math.max(Number(row.created_today || 0), Number(row.learned_today || 0))),
+      1
+    );
   }, [learningSeries]);
 
   const pageTitle =
@@ -1737,11 +1765,11 @@ function App() {
                 <div className="empty">No learning data for last 14 days.</div>
               ) : (
                 <div className="learning-chart-wrap">
-                  <div className="learning-chart-title">Learned Words / Total Words (Last 14 Days)</div>
+                  <div className="learning-chart-title">Learned Today / Created Today (Last 14 Days)</div>
                   <div className="learning-chart">
                     {learningSeries.map((row) => {
-                      const totalWords = Number(row.total_words || 0);
-                      const learnedCount = Number(row.learned_count || 0);
+                      const totalWords = Number(row.created_today || 0);
+                      const learnedCount = Number(row.learned_today || 0);
                       const learnedHeight = `${Math.max(2, (learnedCount / learningChartMax) * 100)}%`;
                       const totalHeight = `${Math.max(2, (totalWords / learningChartMax) * 100)}%`;
                       const dateLabel = row.event_date.slice(5);
@@ -1771,7 +1799,7 @@ function App() {
 
             <div className="test-stats">
               <div>
-                Active Today ({todayYmd}): {presenceLoading ? "Loading..." : formatDurationLong(todayActiveMs)}
+                Active Today ({todayYmd}): {presenceLoading ? "Loading..." : formatDurationLong(todayActiveLiveMs)}
               </div>
             </div>
 

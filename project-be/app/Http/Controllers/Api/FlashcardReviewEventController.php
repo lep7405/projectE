@@ -25,13 +25,10 @@ class FlashcardReviewEventController extends Controller
         $startDate = Carbon::parse($endDate)->subDays($days - 1)->toDateString();
         $backLang = $validated['back_lang'] ?? null;
 
-        /*
-        |--------------------------------------------------------------------------
-        | 1️⃣ Get created per day (ONLY within range)
-        |--------------------------------------------------------------------------
-        */
+        // Created words per day in selected range.
         $createdQuery = Flashcard::query()
             ->selectRaw('DATE(created_at) as date, COUNT(*) as created_count')
+            ->whereDate('created_at', '>=', $startDate)
             ->whereDate('created_at', '<=', $endDate);
 
         if (!empty($backLang) && $backLang !== 'all') {
@@ -42,11 +39,7 @@ class FlashcardReviewEventController extends Controller
             ->groupBy(DB::raw('DATE(created_at)'))
             ->pluck('created_count', 'date');
 
-        /*
-        |--------------------------------------------------------------------------
-        | 2️⃣ Get learned per day (within range)
-        |--------------------------------------------------------------------------
-        */
+        // Learned words per day in selected range.
         $learnedQuery = FlashcardReviewEvent::query()
             ->selectRaw('DATE(event_date) as date, COUNT(DISTINCT flashcard_id) as learned_count')
             ->whereDate('event_date', '>=', $startDate)
@@ -60,15 +53,8 @@ class FlashcardReviewEventController extends Controller
             ->groupBy(DB::raw('DATE(event_date)'))
             ->pluck('learned_count', 'date');
 
-        /*
-        |--------------------------------------------------------------------------
-        | 3️⃣ Build daily series with cumulative logic
-        |--------------------------------------------------------------------------
-        */
+        // Build daily series as learned_today / created_today.
         $series = collect();
-
-        $cumulativeTotalWords = 0;
-        $cumulativeLearned    = 0;
 
         for ($i = 0; $i < $days; $i++) {
             $date = Carbon::parse($startDate)->addDays($i)->toDateString();
@@ -76,33 +62,23 @@ class FlashcardReviewEventController extends Controller
             $createdToday = (int) ($createdByDate[$date] ?? 0);
             $learnedToday = (int) ($learnedByDate[$date] ?? 0);
 
-            $cumulativeTotalWords += $createdToday;
-            $cumulativeLearned    += $learnedToday;
-
             $series->push([
-                'event_date'       => $date,
-                'created_today'    => $createdToday,
-                'learned_today'    => $learnedToday,
-                'total_words'      => $cumulativeTotalWords,
-                'total_learned'    => $cumulativeLearned,
-                'unlearned_count'  => max(0, $cumulativeTotalWords - $cumulativeLearned),
+                'event_date' => $date,
+                'created_today' => $createdToday,
+                'learned_today' => $learnedToday,
+                'unlearned_today' => max(0, $createdToday - $learnedToday),
             ]);
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | 4️⃣ Response
-        |--------------------------------------------------------------------------
-        */
         return response()->json([
             'data' => $series,
             'meta' => [
-                'start_date'         => $startDate,
-                'end_date'           => $endDate,
-                'days'               => $days,
-                'back_lang'          => $backLang ?? 'all',
-                'total_words_latest' => $series->last()['total_words'] ?? 0,
-                'total_learned_latest' => $series->last()['total_learned'] ?? 0,
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'days' => $days,
+                'back_lang' => $backLang ?? 'all',
+                'created_total_in_range' => $series->sum('created_today'),
+                'learned_total_in_range' => $series->sum('learned_today'),
             ],
         ]);
     }
