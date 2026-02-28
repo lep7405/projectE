@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\DailyFinanceController;
+use App\Http\Controllers\Api\FlashcardReviewEventController;
 use App\Http\Controllers\Api\SentenceController;
 use App\Http\Controllers\Api\TaskController;
 use App\Http\Controllers\Api\TestHistoryController;
@@ -32,3 +33,6 @@ Route::post('/tasks', [TaskController::class, 'store']);
 Route::put('/tasks/{task}', [TaskController::class, 'update']);
 Route::patch('/tasks/{task}', [TaskController::class, 'update']);
 Route::delete('/tasks/{task}', [TaskController::class, 'destroy']);
+
+Route::post('/flashcard-review-events', [FlashcardReviewEventController::class, 'store']);
+Route::get('/flashcard-review-events/stats/daily', [FlashcardReviewEventController::class, 'dailyStats']);

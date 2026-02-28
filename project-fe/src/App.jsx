@@ -3,6 +3,9 @@ import "./App.css";
 
 function App() {
   const apiBaseUrl = useMemo(() => (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api").replace(/\/+$/, ""), []);
+  const toYmd = (date) => date.toISOString().slice(0, 10);
+  const todayYmd = toYmd(new Date());
+  const weekAgoYmd = toYmd(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
 
   const [page, setPage] = useState("dashboard");
 
@@ -75,6 +78,11 @@ function App() {
   });
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [taskSubmitting, setTaskSubmitting] = useState(false);
+  const [dailyClickStats, setDailyClickStats] = useState([]);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsBackLang, setStatsBackLang] = useState("all");
+  const [statsStartDate, setStatsStartDate] = useState(weekAgoYmd);
+  const [statsEndDate, setStatsEndDate] = useState(todayYmd);
 
   const limitOptions = [10, 20, 50, 100, 200];
   const backLangOptions = [
@@ -172,6 +180,26 @@ function App() {
     setTasks(data.data || []);
   };
 
+  const loadClickStats = async (currentStartDate = statsStartDate, currentEndDate = statsEndDate, currentBackLang = statsBackLang) => {
+    setStatsLoading(true);
+    setError("");
+    try {
+      const params = new URLSearchParams();
+      if (currentStartDate) params.set("start_date", currentStartDate);
+      if (currentEndDate) params.set("end_date", currentEndDate);
+      if (currentBackLang && currentBackLang !== "all") params.set("back_lang", currentBackLang);
+
+      const res = await fetch(`${apiBaseUrl}/flashcard-review-events/stats/daily?${params.toString()}`);
+      if (!res.ok) throw new Error("Cannot load click stats");
+      const data = await res.json();
+      setDailyClickStats(data.data || []);
+    } catch (err) {
+      setError(err.message || "Something went wrong");
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
   const resetFinanceForm = () => {
     setEditingFinanceId(null);
     setFinanceForm({
@@ -232,6 +260,11 @@ function App() {
   useEffect(() => {
     if (page === "finance") {
       Promise.all([loadFinances(), loadDailyRewards(), loadTestHistories()]).catch((err) => {
+        setError(err.message || "Something went wrong");
+      });
+    }
+    if (page === "stats") {
+      loadClickStats().catch((err) => {
         setError(err.message || "Something went wrong");
       });
     }
@@ -372,6 +405,44 @@ function App() {
   const clearDashboardDateFilter = () => {
     setDashboardDate("");
     loadSentences(limit, backLang, "");
+  };
+
+  const onStatsStartDateChange = (e) => {
+    const value = e.target.value || "";
+    setStatsStartDate(value);
+    loadClickStats(value, statsEndDate, statsBackLang);
+  };
+
+  const onStatsEndDateChange = (e) => {
+    const value = e.target.value || "";
+    setStatsEndDate(value);
+    loadClickStats(statsStartDate, value, statsBackLang);
+  };
+
+  const onStatsBackLangChange = (e) => {
+    const value = e.target.value;
+    setStatsBackLang(value);
+    loadClickStats(statsStartDate, statsEndDate, value);
+  };
+
+  const logFlashcardClick = async (item) => {
+    if (!item?.id) return;
+    const payload = {
+      flashcard_id: item.id,
+      back_lang: item.back_lang || (backLang !== "all" ? backLang : undefined),
+    };
+
+    try {
+      await fetch(`${apiBaseUrl}/flashcard-review-events`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      // Do not block UI when logging click events.
+    }
   };
 
   const parseBulkText = (rawText) => {
@@ -665,11 +736,13 @@ function App() {
     }
   };
 
-  const toggleCard = (id) => {
+  const toggleCard = (item) => {
+    const id = item.id;
     setFlippedCards((prev) => ({
       ...prev,
       [id]: !prev[id],
     }));
+    void logFlashcardClick(item);
   };
 
   const areAllCardsFlipped = sentences.length > 0 && sentences.every((item) => Boolean(flippedCards[item.id]));
@@ -884,8 +957,28 @@ function App() {
 
   const rememberYesCount = testCards.filter((card) => testResults[card.id]?.remembered === true).length;
   const knowYesCount = testCards.filter((card) => testResults[card.id]?.known === true).length;
+  const dailyClickTotals = useMemo(() => {
+    const grouped = dailyClickStats.reduce((acc, row) => {
+      const dateKey = row.event_date;
+      acc[dateKey] = (acc[dateKey] || 0) + Number(row.total_clicks || 0);
+      return acc;
+    }, {});
+
+    return Object.entries(grouped)
+      .map(([eventDate, totalClicks]) => ({ event_date: eventDate, total_clicks: totalClicks }))
+      .sort((a, b) => (a.event_date < b.event_date ? 1 : -1));
+  }, [dailyClickStats]);
+
   const pageTitle =
-    page === "dashboard" ? "Sentence Dashboard" : page === "test" ? "Flashcard Test" : page === "finance" ? "Daily Finance" : "Task Manager";
+    page === "dashboard"
+      ? "Sentence Dashboard"
+      : page === "test"
+      ? "Flashcard Test"
+      : page === "finance"
+      ? "Daily Finance"
+      : page === "stats"
+      ? "Flashcard Stats"
+      : "Task Manager";
 
   return (
     <div className="page">
@@ -901,6 +994,9 @@ function App() {
             </button>
             <button className={`btn ${page === "finance" ? "btn-primary" : ""}`} onClick={() => setPage("finance")}>
               Finance
+            </button>
+            <button className={`btn ${page === "stats" ? "btn-primary" : ""}`} onClick={() => setPage("stats")}>
+              Stats
             </button>
             <button className={`btn ${page === "task" ? "btn-primary" : ""}`} onClick={() => setPage("task")}>
               Task
@@ -988,6 +1084,24 @@ function App() {
               {editingRewardId ? "Cancel Reward Edit" : "Clear Reward Form"}
             </button>
           </div>
+        ) : page === "stats" ? (
+          <div className="toolbar">
+            <label htmlFor="stats-start-date">From</label>
+            <input id="stats-start-date" type="date" value={statsStartDate} onChange={onStatsStartDateChange} />
+            <label htmlFor="stats-end-date">To</label>
+            <input id="stats-end-date" type="date" value={statsEndDate} onChange={onStatsEndDateChange} />
+            <label htmlFor="stats-back-lang">Back Lang</label>
+            <select id="stats-back-lang" className="lang-select" value={statsBackLang} onChange={onStatsBackLangChange}>
+              {backLangOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <button className="btn" onClick={() => loadClickStats(statsStartDate, statsEndDate, statsBackLang)}>
+              Refresh Stats
+            </button>
+          </div>
         ) : (
           <div className="toolbar">
             <button className="btn" onClick={() => loadTasks().catch((err) => setError(err.message || "Something went wrong"))}>
@@ -1008,7 +1122,7 @@ function App() {
 
             {!loading
               ? sentences.map((item) => (
-                  <article key={item.id} className={`flash-card ${flippedCards[item.id] ? "is-flipped" : ""}`} onClick={() => toggleCard(item.id)}>
+                  <article key={item.id} className={`flash-card ${flippedCards[item.id] ? "is-flipped" : ""}`} onClick={() => toggleCard(item)}>
                     <div className="flash-card-inner">
                       <div className="flash-card-face flash-card-front">
                         <div className="card-id">#{item.id}</div>
@@ -1319,6 +1433,60 @@ function App() {
                         <td>{formatDuration(item.total_time_ms || 0)}</td>
                         <td>{item.remember_yes_count}</td>
                         <td>{item.known_yes_count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        ) : page === "stats" ? (
+          <div className="finance-area">
+            <div className="finance-table-wrap">
+              {statsLoading ? (
+                <div className="empty">Loading stats...</div>
+              ) : dailyClickTotals.length === 0 ? (
+                <div className="empty">No click stats in selected range.</div>
+              ) : (
+                <table className="finance-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Total Clicks</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dailyClickTotals.map((row) => (
+                      <tr key={row.event_date}>
+                        <td>{row.event_date}</td>
+                        <td>{row.total_clicks}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="finance-table-wrap">
+              {statsLoading ? (
+                <div className="empty">Loading stats...</div>
+              ) : dailyClickStats.length === 0 ? (
+                <div className="empty">No language breakdown.</div>
+              ) : (
+                <table className="finance-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Back Lang</th>
+                      <th>Clicks</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dailyClickStats.map((row) => (
+                      <tr key={`${row.event_date}-${row.back_lang}`}>
+                        <td>{row.event_date}</td>
+                        <td>{row.back_lang}</td>
+                        <td>{row.total_clicks}</td>
                       </tr>
                     ))}
                   </tbody>
