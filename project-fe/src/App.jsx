@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { jsPDF } from "jspdf";
 import "./App.css";
 
 function App() {
@@ -82,6 +83,12 @@ function App() {
   const [statsLoading, setStatsLoading] = useState(false);
   const [presenceLoading, setPresenceLoading] = useState(false);
   const [presenceDailyStats, setPresenceDailyStats] = useState([]);
+  const [learningLoading, setLearningLoading] = useState(false);
+  const [learningSeries, setLearningSeries] = useState([]);
+  const [dayDetailLoading, setDayDetailLoading] = useState(false);
+  const [selectedLearningDay, setSelectedLearningDay] = useState("");
+  const [learningDayDetail, setLearningDayDetail] = useState({ learned_words: [], unlearned_words: [] });
+  const [isLearningDetailOpen, setIsLearningDetailOpen] = useState(false);
   const [statsBackLang, setStatsBackLang] = useState("all");
   const [statsStartDate, setStatsStartDate] = useState(weekAgoYmd);
   const [statsEndDate, setStatsEndDate] = useState(todayYmd);
@@ -234,6 +241,81 @@ function App() {
     }
   };
 
+  const loadLearningOverview = async (currentEndDate = statsEndDate, currentBackLang = statsBackLang) => {
+    setLearningLoading(true);
+    setError("");
+    try {
+      const params = new URLSearchParams();
+      if (currentEndDate) params.set("end_date", currentEndDate);
+      params.set("days", "14");
+      if (currentBackLang && currentBackLang !== "all") params.set("back_lang", currentBackLang);
+
+      const res = await fetch(`${apiBaseUrl}/flashcard-review-events/stats/learning-overview?${params.toString()}`);
+      if (!res.ok) throw new Error("Cannot load 14-day learning overview");
+      const data = await res.json();
+      setLearningSeries(data.data || []);
+    } catch (err) {
+      setError(err.message || "Something went wrong");
+    } finally {
+      setLearningLoading(false);
+    }
+  };
+
+  const openLearningDayDetail = async (date) => {
+    setDayDetailLoading(true);
+    setError("");
+    setSelectedLearningDay(date);
+    setIsLearningDetailOpen(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("date", date);
+      if (statsBackLang && statsBackLang !== "all") params.set("back_lang", statsBackLang);
+
+      const res = await fetch(`${apiBaseUrl}/flashcard-review-events/stats/day-detail?${params.toString()}`);
+      if (!res.ok) throw new Error("Cannot load day detail");
+      const data = await res.json();
+      setLearningDayDetail(data.data || { learned_words: [], unlearned_words: [] });
+    } catch (err) {
+      setError(err.message || "Something went wrong");
+      setLearningDayDetail({ learned_words: [], unlearned_words: [] });
+    } finally {
+      setDayDetailLoading(false);
+    }
+  };
+
+  const downloadUnlearnedPdf = () => {
+    const rows = learningDayDetail.unlearned_words || [];
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const lineHeight = 16;
+    const left = 40;
+    let y = 48;
+    let pageNo = 1;
+    const maxY = 800;
+
+    const writeLine = (text) => {
+      if (y > maxY) {
+        doc.addPage();
+        pageNo += 1;
+        y = 48;
+      }
+      doc.text(String(text), left, y);
+      y += lineHeight;
+    };
+
+    doc.setFontSize(14);
+    writeLine(`Unlearned Words - ${selectedLearningDay || statsEndDate}`);
+    writeLine(`Back Lang: ${statsBackLang}`);
+    writeLine(`Total: ${rows.length}`);
+    y += 8;
+    doc.setFontSize(11);
+    rows.forEach((row, idx) => {
+      writeLine(`${idx + 1}. [#${row.flashcard_id}] ${row.vietnamese_sentence || "-"} | ${row.english_sentence || "-"}`);
+    });
+
+    const safeDate = (selectedLearningDay || statsEndDate || "date").replace(/[^0-9-]/g, "");
+    doc.save(`unlearned-words-${safeDate}.pdf`);
+  };
+
   const sendPresenceHeartbeat = (activeMs, pageName, useBeacon = false) => {
     if (!activeMs || activeMs < 1000) return;
     const payload = JSON.stringify({
@@ -338,7 +420,7 @@ function App() {
       });
     }
     if (page === "stats") {
-      Promise.all([loadClickStats(), loadPresenceStats()]).catch((err) => {
+      Promise.all([loadClickStats(), loadPresenceStats(), loadLearningOverview()]).catch((err) => {
         setError(err.message || "Something went wrong");
       });
     }
@@ -546,15 +628,19 @@ function App() {
   const onStatsEndDateChange = (e) => {
     const value = e.target.value || "";
     setStatsEndDate(value);
-    Promise.all([loadClickStats(statsStartDate, value, statsBackLang), loadPresenceStats(statsStartDate, value)]).catch((err) => {
-      setError(err.message || "Something went wrong");
-    });
+    Promise.all([loadClickStats(statsStartDate, value, statsBackLang), loadPresenceStats(statsStartDate, value), loadLearningOverview(value, statsBackLang)]).catch(
+      (err) => {
+        setError(err.message || "Something went wrong");
+      }
+    );
   };
 
   const onStatsBackLangChange = (e) => {
     const value = e.target.value;
     setStatsBackLang(value);
-    loadClickStats(statsStartDate, statsEndDate, value);
+    Promise.all([loadClickStats(statsStartDate, statsEndDate, value), loadLearningOverview(statsEndDate, value)]).catch((err) => {
+      setError(err.message || "Something went wrong");
+    });
   };
 
   const logFlashcardClick = async (item) => {
@@ -1107,6 +1193,10 @@ function App() {
     const row = presenceDailyTotals.find((item) => item.event_date === todayYmd);
     return Number(row?.total_active_ms || 0);
   }, [presenceDailyTotals, todayYmd]);
+  const learningChartMax = useMemo(() => {
+    if (learningSeries.length === 0) return 1;
+    return Math.max(...learningSeries.map((row) => Number(row.total_words || 0)), 1);
+  }, [learningSeries]);
 
   const pageTitle =
     page === "dashboard"
@@ -1240,9 +1330,11 @@ function App() {
             <button
               className="btn"
               onClick={() =>
-                Promise.all([loadClickStats(statsStartDate, statsEndDate, statsBackLang), loadPresenceStats(statsStartDate, statsEndDate)]).catch(
-                  (err) => setError(err.message || "Something went wrong")
-                )
+                Promise.all([
+                  loadClickStats(statsStartDate, statsEndDate, statsBackLang),
+                  loadPresenceStats(statsStartDate, statsEndDate),
+                  loadLearningOverview(statsEndDate, statsBackLang),
+                ]).catch((err) => setError(err.message || "Something went wrong"))
               }
             >
               Refresh Stats
@@ -1588,6 +1680,45 @@ function App() {
           </div>
         ) : page === "stats" ? (
           <div className="finance-area">
+            <div className="finance-table-wrap">
+              {learningLoading ? (
+                <div className="empty">Loading 14-day learning chart...</div>
+              ) : learningSeries.length === 0 ? (
+                <div className="empty">No learning data for last 14 days.</div>
+              ) : (
+                <div className="learning-chart-wrap">
+                  <div className="learning-chart-title">Learned Words / Total Words (Last 14 Days)</div>
+                  <div className="learning-chart">
+                    {learningSeries.map((row) => {
+                      const totalWords = Number(row.total_words || 0);
+                      const learnedCount = Number(row.learned_count || 0);
+                      const learnedHeight = `${Math.max(2, (learnedCount / learningChartMax) * 100)}%`;
+                      const totalHeight = `${Math.max(2, (totalWords / learningChartMax) * 100)}%`;
+                      const dateLabel = row.event_date.slice(5);
+                      return (
+                        <button
+                          key={row.event_date}
+                          type="button"
+                          className="learning-bar-btn"
+                          onClick={() => openLearningDayDetail(row.event_date)}
+                          title={`${row.event_date}: ${learnedCount}/${totalWords}`}
+                        >
+                          <div className="learning-bar-stack">
+                            <div className="learning-bar-total" style={{ height: totalHeight }} />
+                            <div className="learning-bar-learned" style={{ height: learnedHeight }} />
+                          </div>
+                          <div className="learning-bar-value">
+                            {learnedCount}/{totalWords}
+                          </div>
+                          <div className="learning-bar-date">{dateLabel}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="test-stats">
               <div>
                 Active Today ({todayYmd}): {presenceLoading ? "Loading..." : formatDurationLong(todayActiveMs)}
@@ -1843,6 +1974,86 @@ function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isLearningDetailOpen ? (
+        <div className="modal-overlay" onClick={() => setIsLearningDetailOpen(false)}>
+          <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
+            <h2>Learning Detail - {selectedLearningDay || "-"}</h2>
+            {dayDetailLoading ? (
+              <div className="empty">Loading detail...</div>
+            ) : (
+              <div className="learning-detail-grid">
+                <div className="finance-table-wrap">
+                  <div className="learning-detail-header">
+                    <h3>Learned Words ({learningDayDetail.learned_words?.length || 0})</h3>
+                  </div>
+                  {learningDayDetail.learned_words?.length ? (
+                    <table className="finance-table">
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>Vietnamese</th>
+                          <th>English</th>
+                          <th>Clicks</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {learningDayDetail.learned_words.map((row) => (
+                          <tr key={`learned-${row.flashcard_id}`}>
+                            <td>{row.flashcard_id}</td>
+                            <td>{row.vietnamese_sentence || "-"}</td>
+                            <td>{row.english_sentence || "-"}</td>
+                            <td>{row.click_count}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="empty">No learned words this day.</div>
+                  )}
+                </div>
+
+                <div className="finance-table-wrap">
+                  <div className="learning-detail-header">
+                    <h3>Unlearned Words ({learningDayDetail.unlearned_words?.length || 0})</h3>
+                    <button className="btn" type="button" onClick={downloadUnlearnedPdf} disabled={!learningDayDetail.unlearned_words?.length}>
+                      Download Unlearned PDF
+                    </button>
+                  </div>
+                  {learningDayDetail.unlearned_words?.length ? (
+                    <table className="finance-table">
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>Vietnamese</th>
+                          <th>English</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {learningDayDetail.unlearned_words.map((row) => (
+                          <tr key={`unlearned-${row.flashcard_id}`}>
+                            <td>{row.flashcard_id}</td>
+                            <td>{row.vietnamese_sentence || "-"}</td>
+                            <td>{row.english_sentence || "-"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="empty">No unlearned words.</div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="modal-actions">
+              <button type="button" className="btn" onClick={() => setIsLearningDetailOpen(false)}>
+                Close
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

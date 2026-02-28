@@ -12,6 +12,140 @@ use Illuminate\Support\Facades\DB;
 
 class FlashcardReviewEventController extends Controller
 {
+    public function learningOverview(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'end_date' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+            'days' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:60'],
+            'back_lang' => ['sometimes', 'nullable', 'string', 'max:10'],
+        ]);
+
+        $endDate = $validated['end_date'] ?? now()->toDateString();
+        $days = (int) ($validated['days'] ?? 14);
+        $startDate = Carbon::parse($endDate)->subDays($days - 1)->toDateString();
+        $backLang = $validated['back_lang'] ?? null;
+
+        $flashcardQuery = Flashcard::query();
+        if (! empty($backLang) && $backLang !== 'all') {
+            $flashcardQuery->where('back_lang', $backLang);
+        }
+        $totalWords = $flashcardQuery->count();
+
+        $eventQuery = FlashcardReviewEvent::query()
+            ->selectRaw('DATE(event_date) as event_date, COUNT(DISTINCT flashcard_id) as learned_count')
+            ->whereDate('event_date', '>=', $startDate)
+            ->whereDate('event_date', '<=', $endDate);
+
+        if (! empty($backLang) && $backLang !== 'all') {
+            $eventQuery->where('back_lang', $backLang);
+        }
+
+        $learnedByDate = $eventQuery
+            ->groupBy(DB::raw('DATE(event_date)'))
+            ->pluck('learned_count', 'event_date');
+
+        $series = collect();
+        for ($offset = 0; $offset < $days; $offset++) {
+            $date = Carbon::parse($startDate)->addDays($offset)->toDateString();
+            $learnedCount = (int) ($learnedByDate[$date] ?? 0);
+            $series->push([
+                'event_date' => $date,
+                'learned_count' => $learnedCount,
+                'total_words' => $totalWords,
+                'unlearned_count' => max(0, $totalWords - $learnedCount),
+            ]);
+        }
+
+        return response()->json([
+            'data' => $series,
+            'meta' => [
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'days' => $days,
+                'back_lang' => $backLang ?? 'all',
+                'total_words' => $totalWords,
+            ],
+        ]);
+    }
+
+    public function dayDetail(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'date' => ['required', 'date_format:Y-m-d'],
+            'back_lang' => ['sometimes', 'nullable', 'string', 'max:10'],
+        ]);
+
+        $date = $validated['date'];
+        $backLang = $validated['back_lang'] ?? null;
+
+        $learnedQuery = FlashcardReviewEvent::query()
+            ->join('flashcards', 'flashcards.id', '=', 'flashcard_review_events.flashcard_id')
+            ->selectRaw('flashcard_review_events.flashcard_id, flashcards.front_text, flashcards.back_text, flashcards.back_lang, COUNT(*) as click_count, MIN(event_at) as first_clicked_at, MAX(event_at) as last_clicked_at')
+            ->whereDate('flashcard_review_events.event_date', '=', $date);
+
+        if (! empty($backLang) && $backLang !== 'all') {
+            $learnedQuery->where('flashcard_review_events.back_lang', $backLang);
+            $learnedQuery->where('flashcards.back_lang', $backLang);
+        }
+
+        $learnedWords = $learnedQuery
+            ->groupBy('flashcard_review_events.flashcard_id', 'flashcards.front_text', 'flashcards.back_text', 'flashcards.back_lang')
+            ->orderByDesc('click_count')
+            ->orderBy('flashcard_review_events.flashcard_id')
+            ->get()
+            ->map(fn ($row): array => [
+                'flashcard_id' => (int) $row->flashcard_id,
+                'vietnamese_sentence' => $row->front_text,
+                'english_sentence' => $row->back_text,
+                'back_lang' => $row->back_lang,
+                'click_count' => (int) $row->click_count,
+                'first_clicked_at' => $row->first_clicked_at,
+                'last_clicked_at' => $row->last_clicked_at,
+            ])
+            ->values();
+
+        $clickedUntilDate = FlashcardReviewEvent::query()
+            ->select('flashcard_id')
+            ->whereDate('event_date', '<=', $date);
+        if (! empty($backLang) && $backLang !== 'all') {
+            $clickedUntilDate->where('back_lang', $backLang);
+        }
+        $clickedIds = $clickedUntilDate->distinct()->pluck('flashcard_id');
+
+        $unlearnedQuery = Flashcard::query()->select(['id', 'front_text', 'back_text', 'back_lang']);
+        if (! empty($backLang) && $backLang !== 'all') {
+            $unlearnedQuery->where('back_lang', $backLang);
+        }
+        if ($clickedIds->count() > 0) {
+            $unlearnedQuery->whereNotIn('id', $clickedIds);
+        }
+
+        $unlearnedWords = $unlearnedQuery
+            ->orderBy('id')
+            ->limit(5000)
+            ->get()
+            ->map(fn (Flashcard $row): array => [
+                'flashcard_id' => (int) $row->id,
+                'vietnamese_sentence' => $row->front_text,
+                'english_sentence' => $row->back_text,
+                'back_lang' => $row->back_lang,
+            ])
+            ->values();
+
+        return response()->json([
+            'data' => [
+                'date' => $date,
+                'back_lang' => $backLang ?? 'all',
+                'learned_words' => $learnedWords,
+                'unlearned_words' => $unlearnedWords,
+            ],
+            'meta' => [
+                'learned_count' => $learnedWords->count(),
+                'unlearned_count' => $unlearnedWords->count(),
+            ],
+        ]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $validated = $request->validate([

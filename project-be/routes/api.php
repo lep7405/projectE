@@ -38,6 +38,8 @@ Route::delete('/tasks/{task}', [TaskController::class, 'destroy']);
 Route::post('/flashcard-review-events', [FlashcardReviewEventController::class, 'store']);
 Route::get('/flashcard-review-events', [FlashcardReviewEventController::class, 'index']);
 Route::get('/flashcard-review-events/stats/daily', [FlashcardReviewEventController::class, 'dailyStats']);
+Route::get('/flashcard-review-events/stats/learning-overview', [FlashcardReviewEventController::class, 'learningOverview']);
+Route::get('/flashcard-review-events/stats/day-detail', [FlashcardReviewEventController::class, 'dayDetail']);
 
 Route::post('/presence/heartbeat', [PresenceController::class, 'heartbeat']);
 Route::get('/presence/stats/daily', [PresenceController::class, 'dailyStats']);
