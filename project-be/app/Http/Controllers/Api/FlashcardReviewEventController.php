@@ -104,13 +104,13 @@ class FlashcardReviewEventController extends Controller
             ])
             ->values();
 
-        $clickedUntilDate = FlashcardReviewEvent::query()
+        $clickedInDay = FlashcardReviewEvent::query()
             ->select('flashcard_id')
-            ->whereDate('event_date', '<=', $date);
+            ->whereDate('event_date', '=', $date);
         if (! empty($backLang) && $backLang !== 'all') {
-            $clickedUntilDate->where('back_lang', $backLang);
+            $clickedInDay->where('back_lang', $backLang);
         }
-        $clickedIds = $clickedUntilDate->distinct()->pluck('flashcard_id');
+        $clickedIds = $clickedInDay->distinct()->pluck('flashcard_id');
 
         $unlearnedQuery = Flashcard::query()->select(['id', 'front_text', 'back_text', 'back_lang']);
         if (! empty($backLang) && $backLang !== 'all') {
