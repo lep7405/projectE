@@ -8,6 +8,7 @@ function App() {
 
   const [limit, setLimit] = useState(10);
   const [backLang, setBackLang] = useState("all");
+  const [dashboardDate, setDashboardDate] = useState("");
   const [sentences, setSentences] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -103,12 +104,12 @@ function App() {
     return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   };
 
-  const getTodayDate = () => new Date().toISOString().slice(0, 10);
-
-  const fetchSentences = async (currentLimit, currentBackLang) => {
+  const fetchSentences = async (currentLimit, currentBackLang, currentCreatedDate = "") => {
     const params = new URLSearchParams();
     params.set("limit", String(currentLimit));
-    params.set("created_date", getTodayDate());
+    if (currentCreatedDate) {
+      params.set("created_date", currentCreatedDate);
+    }
     if (currentBackLang && currentBackLang !== "all") {
       params.set("back_lang", currentBackLang);
     }
@@ -121,11 +122,11 @@ function App() {
     return data.data || [];
   };
 
-  const loadSentences = async (currentLimit = limit, currentBackLang = backLang) => {
+  const loadSentences = async (currentLimit = limit, currentBackLang = backLang, currentCreatedDate = dashboardDate) => {
     setLoading(true);
     setError("");
     try {
-      const data = await fetchSentences(currentLimit, currentBackLang);
+      const data = await fetchSentences(currentLimit, currentBackLang, currentCreatedDate);
       setSentences(data);
       setFlippedCards({});
     } catch (err) {
@@ -359,7 +360,18 @@ function App() {
   const onBackLangChange = (e) => {
     const nextBackLang = e.target.value;
     setBackLang(nextBackLang);
-    loadSentences(limit, nextBackLang);
+    loadSentences(limit, nextBackLang, dashboardDate);
+  };
+
+  const onDashboardDateChange = (e) => {
+    const nextDate = e.target.value || "";
+    setDashboardDate(nextDate);
+    loadSentences(limit, backLang, nextDate);
+  };
+
+  const clearDashboardDateFilter = () => {
+    setDashboardDate("");
+    loadSentences(limit, backLang, "");
   };
 
   const parseBulkText = (rawText) => {
@@ -920,6 +932,11 @@ function App() {
                 </option>
               ))}
             </select>
+            <label htmlFor="dashboard-date">Date</label>
+            <input id="dashboard-date" type="date" value={dashboardDate} onChange={onDashboardDateChange} />
+            <button className="btn" onClick={clearDashboardDateFilter} disabled={!dashboardDate}>
+              Clear Date
+            </button>
             <button className="btn" onClick={toggleAllCards}>
               {areAllCardsFlipped ? "Show Front" : "Flip All"}
             </button>
