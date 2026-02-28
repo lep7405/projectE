@@ -355,6 +355,90 @@ function App() {
     doc.save(`unlearned-words-${safeDate}.pdf`);
   };
 
+  const downloadUnlearnedCsv = () => {
+    const rows = learningDayDetail.unlearned_words || [];
+    const clean = (value) =>
+      String(value ?? "")
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
+        .trim();
+    const esc = (value) => `"${clean(value).replace(/"/g, '""')}"`;
+    const header = ["No", "Flashcard ID", "Vietnamese", "English", "Back Lang"];
+    const lines = [header.map(esc).join(",")];
+    rows.forEach((row, idx) => {
+      lines.push([idx + 1, row.flashcard_id, row.vietnamese_sentence, row.english_sentence, row.back_lang].map(esc).join(","));
+    });
+    const csvContent = `\uFEFF${lines.join("\r\n")}`;
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const safeDate = (selectedLearningDay || statsEndDate || "date").replace(/[^0-9-]/g, "");
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `unlearned-words-${safeDate}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+
+  const downloadUnlearnedDoc = () => {
+    const rows = learningDayDetail.unlearned_words || [];
+    const clean = (value) =>
+      String(value ?? "")
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
+        .trim();
+    const escapeHtml = (value) =>
+      clean(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Unlearned Words</title>
+  <style>
+    body { font-family: "Segoe UI", Arial, sans-serif; font-size: 12pt; color: #111; }
+    h2, p { margin: 0 0 8px 0; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #bbb; padding: 6px; vertical-align: top; text-align: left; }
+    th { background: #f3f3f3; }
+  </style>
+</head>
+<body>
+  <h2>Unlearned Words - ${escapeHtml(selectedLearningDay || statsEndDate)}</h2>
+  <p>Back Lang: ${escapeHtml(statsBackLang)}</p>
+  <p>Total: ${rows.length}</p>
+  <table>
+    <thead>
+      <tr><th>No</th><th>Flashcard ID</th><th>Vietnamese</th><th>English</th><th>Back Lang</th></tr>
+    </thead>
+    <tbody>
+      ${rows
+        .map(
+          (row, idx) => `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${escapeHtml(row.flashcard_id)}</td>
+          <td>${escapeHtml(row.vietnamese_sentence)}</td>
+          <td>${escapeHtml(row.english_sentence)}</td>
+          <td>${escapeHtml(row.back_lang)}</td>
+        </tr>`
+        )
+        .join("")}
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+    const blob = new Blob([`\uFEFF${html}`], { type: "application/msword;charset=utf-8" });
+    const safeDate = (selectedLearningDay || statsEndDate || "date").replace(/[^0-9-]/g, "");
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `unlearned-words-${safeDate}.doc`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+
   const sendPresenceHeartbeat = (activeMs, pageName, useBeacon = false) => {
     if (!activeMs || activeMs < 1000) return;
     const payload = JSON.stringify({
@@ -2058,9 +2142,17 @@ function App() {
                 <div className="finance-table-wrap">
                   <div className="learning-detail-header">
                     <h3>Unlearned Words ({learningDayDetail.unlearned_words?.length || 0})</h3>
-                    <button className="btn" type="button" onClick={downloadUnlearnedPdf} disabled={!learningDayDetail.unlearned_words?.length}>
-                      Download Unlearned PDF
-                    </button>
+                    <div className="actions">
+                      <button className="btn" type="button" onClick={downloadUnlearnedCsv} disabled={!learningDayDetail.unlearned_words?.length}>
+                        Excel (CSV)
+                      </button>
+                      <button className="btn" type="button" onClick={downloadUnlearnedDoc} disabled={!learningDayDetail.unlearned_words?.length}>
+                        Word (.doc)
+                      </button>
+                      <button className="btn" type="button" onClick={downloadUnlearnedPdf} disabled={!learningDayDetail.unlearned_words?.length}>
+                        PDF
+                      </button>
+                    </div>
                   </div>
                   {learningDayDetail.unlearned_words?.length ? (
                     <table className="finance-table">
