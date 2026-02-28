@@ -164,6 +164,13 @@ function App() {
     setTestHistories(data.data || []);
   };
 
+  const loadTasks = async () => {
+    const res = await fetch(`${apiBaseUrl}/tasks?limit=500`);
+    if (!res.ok) throw new Error("Cannot load tasks");
+    const data = await res.json();
+    setTasks(data.data || []);
+  };
+
   const resetFinanceForm = () => {
     setEditingFinanceId(null);
     setFinanceForm({
@@ -194,23 +201,8 @@ function App() {
 
   useEffect(() => {
     loadSentences();
-    const savedTasks = window.localStorage.getItem("projectE.tasks");
-    if (savedTasks) {
-      try {
-        const parsedTasks = JSON.parse(savedTasks);
-        if (Array.isArray(parsedTasks)) {
-          setTasks(parsedTasks);
-        }
-      } catch {
-        setTasks([]);
-      }
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem("projectE.tasks", JSON.stringify(tasks));
-  }, [tasks]);
 
   useEffect(() => {
     return () => {
@@ -239,6 +231,11 @@ function App() {
   useEffect(() => {
     if (page === "finance") {
       Promise.all([loadFinances(), loadDailyRewards(), loadTestHistories()]).catch((err) => {
+        setError(err.message || "Something went wrong");
+      });
+    }
+    if (page === "task") {
+      loadTasks().catch((err) => {
         setError(err.message || "Something went wrong");
       });
     }
@@ -601,11 +598,21 @@ function App() {
         type: taskForm.type,
       };
 
-      if (editingTaskId) {
-        setTasks((prev) => prev.map((item) => (item.id === editingTaskId ? { ...item, ...payload } : item)));
-      } else {
-        setTasks((prev) => [{ id: Date.now(), ...payload }, ...prev]);
+      const isUpdating = Boolean(editingTaskId);
+      const url = isUpdating ? `${apiBaseUrl}/tasks/${editingTaskId}` : `${apiBaseUrl}/tasks`;
+      const res = await fetch(url, {
+        method: isUpdating ? "PUT" : "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || "Save task failed");
       }
+
+      await loadTasks();
       resetTaskForm();
     } catch (err) {
       setError(err.message || "Something went wrong");
@@ -623,13 +630,26 @@ function App() {
     });
   };
 
-  const handleTaskDelete = (item) => {
+  const handleTaskDelete = async (item) => {
     const ok = window.confirm("Delete this task?");
     if (!ok) return;
 
-    setTasks((prev) => prev.filter((task) => task.id !== item.id));
-    if (editingTaskId === item.id) {
-      resetTaskForm();
+    setError("");
+    try {
+      const res = await fetch(`${apiBaseUrl}/tasks/${item.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || "Delete task failed");
+      }
+
+      await loadTasks();
+      if (editingTaskId === item.id) {
+        resetTaskForm();
+      }
+    } catch (err) {
+      setError(err.message || "Something went wrong");
     }
   };
 
@@ -953,6 +973,9 @@ function App() {
           </div>
         ) : (
           <div className="toolbar">
+            <button className="btn" onClick={() => loadTasks().catch((err) => setError(err.message || "Something went wrong"))}>
+              Refresh Tasks
+            </button>
             <button className="btn" onClick={resetTaskForm}>
               {editingTaskId ? "Cancel Edit" : "Clear Form"}
             </button>
